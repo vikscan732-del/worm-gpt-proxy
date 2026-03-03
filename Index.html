@@ -1,15 +1,96 @@
-<!DOCTYPE html>
-<html lang="en">
-<head>
-  <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Worm GPT Proxy</title>
-  <style>body { font-family: sans-serif; background: #111; color: #eee; text-align: center; padding: 50px; } h1 { color: #ff4444; }</style>
-</head>
-<body>
-  <h1>Worm GPT Proxy Active</h1>
-  <p>Use POST to <code>/proxy</code> with form data <code>text=your query</code></p>
-  <p>Example: curl -X POST https://your-project.vercel.app/proxy -d "text=Tell me a joke"</p>
-  <p>Now go back to your HTML chat interface!</p>
-</body>
-</html>
+
+<script>
+  const promptArea = document.getElementById('prompt');
+  const loading = document.getElementById('loading');
+  const responseDiv = document.getElementById('response');
+  const errorDiv = document.getElementById('error');
+
+  async function sendMessage() {
+    const text = promptArea.value.trim();
+    if (!text) {
+      alert("Please enter a message first.");
+      return;
+    }
+
+    loading.style.display = 'block';
+    responseDiv.style.display = 'none';
+    responseDiv.textContent = '';
+    errorDiv.textContent = '';
+
+    try {
+      // Your custom Vercel proxy URL – change only if you redeploy to a new name
+      const proxyUrl = "https://gpt-proxy.vercel.app/proxy";
+
+      const formData = new URLSearchParams();
+      formData.append("text", text);
+
+      console.log("Sending POST to:", proxyUrl);
+      console.log("Payload:", formData.toString());
+
+      const controller = new AbortController();
+      const timeoutId = setTimeout(() => controller.abort(), 60000); // 60s timeout
+
+      const res = await fetch(proxyUrl, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/x-www-form-urlencoded"
+        },
+        body: formData.toString(),
+        signal: controller.signal
+      });
+
+      clearTimeout(timeoutId);
+
+      console.log("Response status:", res.status, res.statusText);
+
+      if (!res.ok) {
+        const errorText = await res.text().catch(() => 'No details');
+        throw new Error(`Proxy returned \( {res.status} \){res.statusText}. Details: ${errorText}`);
+      }
+
+      let data;
+      try {
+        data = await res.json();
+        console.log("Full API response:", data);
+      } catch (jsonErr) {
+        const rawText = await res.text();
+        throw new Error(`Invalid JSON from proxy: ${rawText.substring(0, 200)}...`);
+      }
+
+      // Extract the reply – based on your curl example
+      let reply = data?.wormgpt || data?.response || data?.text || data?.message || JSON.stringify(data, null, 2);
+
+      if (reply && typeof reply === 'string' && reply.trim()) {
+        responseDiv.textContent = reply;
+        responseDiv.style.display = 'block';
+      } else {
+        throw new Error("No valid reply found in response (check console for full data)");
+      }
+
+    } catch (err) {
+      console.error("Fetch / Proxy error:", err);
+
+      let msg = err.message;
+
+      if (err.name === 'AbortError') {
+        msg = "Request timed out (60s) – proxy or Worm GPT API is slow/unreachable.";
+      } else if (msg.includes("404") || msg.includes("NOT_FOUND")) {
+        msg = "404 Not Found – Double-check:\n1. URL is exactly https://gpt-proxy.vercel.app/proxy\n2. File is api/proxy.js in repo\n3. Redeploy after commit\nTest with curl first.";
+      } else if (msg.includes("CORS")) {
+        msg = "CORS issue – your proxy should fix this; check vercel.json headers.";
+      }
+
+      errorDiv.textContent = `Error: ${msg}\n\nOpen browser console (F12 or long-press → Inspect) for more details.`;
+    } finally {
+      loading.style.display = 'none';
+    }
+  }
+
+  // Ctrl+Enter (or Cmd+Enter on Mac) to send
+  promptArea.addEventListener('keydown', (e) => {
+    if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) {
+      e.preventDefault();
+      sendMessage();
+    }
+  });
+</script>
